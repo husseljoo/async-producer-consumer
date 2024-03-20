@@ -1,7 +1,9 @@
 import asyncio, asyncssh, sys
+import time
 
 localmachine_con = None
 sftp_con = None
+items_consumed = 0
 
 
 async def establish_connections():
@@ -16,6 +18,13 @@ async def establish_connections():
     )
 
 
+async def producer_task_copying(queue, record):
+    await asyncio.sleep(1)  # Simulate some asynchronous task
+    finished_record = f"{record}-finished"
+    await queue.put(finished_record)
+    print(f"producer_task_copying produced {finished_record}")
+
+
 async def producer(queue, name):
     for i in range(5):
         await asyncio.sleep(1)  # Simulate some asynchronous task
@@ -24,33 +33,53 @@ async def producer(queue, name):
         print(f"{name} produced {item}")
 
 
-async def consumer(queue, name):
+async def consumer(queue, id):
+    global items_consumed
+    print(f"CONSUMER {id} STARTED")
     while True:
         item = await queue.get()
         print(f"item: {item}")
-        await asyncio.sleep(2)  # Simulate some processing time
-        print(f"{name} consumed {item}")
+        if item == "STOP":
+            # Terminate the consumer when "STOP" is encountered
+            break
+        # Perform additional processing on the metadata (processed record)
+        print(f"Consumer {id} processing metadata of {item}.....")
+        await asyncio.sleep(2)  # Simulate some asynchronous task
+        metadata = f"Metadata: {item}"
+        print(f"Consumer {id} processed metadata: {metadata}")
+        items_consumed += 1
         queue.task_done()
 
 
 async def main():
     await establish_connections()
     queue = asyncio.Queue()
-    result = await localmachine_con.run("ls /home/husseljo/damn/nba/")
-    print("Command output:", result.stdout)
-    print("Exit_status output:", result.exit_status)
+    # the consumer to be running in the background in infiinite loop, until I terminate it by adding a certain string to the queue
+    consumer_tasks = [asyncio.create_task(consumer(queue, i)) for i in range(3)]
 
-    # Create producers
-    producers = [producer(queue, f"Producer-{i}") for i in range(2)]
+    i = 0
+    items_produced = 0
+    while i < 3:
+        i += 1
+        for j in range(2):
+            record = f"{i}-record-{j}"
+            print(f"record: {record}")
+            items_produced += 1
+            await producer_task_copying(queue, record)
 
-    # Create consumers
-    consumers = [consumer(queue, f"Consumer-{i}") for i in range(3)]
+    print(f"\n\n\n\n\nBROKEN\n\n\n\n\n")
+    length = queue.qsize()
+    print(f"Queue length: {length}")
+    for _ in range(3):
+        await queue.put("STOP")
+    # wait untile all remaining tasks are done
+    await asyncio.gather(*consumer_tasks)
+    # while queue.qsize() > 0:
+    #     await asyncio.sleep(1)
 
-    # Start producers and consumers
-    await asyncio.gather(*producers, *consumers)
-
-    # Wait for the queue to be empty
-    await queue.join()
+    print("ALL FINISHED")
+    print("items_produced", items_produced)
+    print("items_consumed", items_consumed)
 
 
 asyncio.run(main())
