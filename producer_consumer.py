@@ -18,20 +18,12 @@ async def establish_connections():
     )
 
 
-async def producer_task_copying(queue, record):
+async def producer_task_copying(queue, record, time):
     print(f"STARTING to produce {record}\n")
-    await asyncio.sleep(1)  # Simulate some asynchronous task
+    await asyncio.sleep(time)  # Simulate some asynchronous task
     finished_record = f"{record}-finished"
     await queue.put(finished_record)
     print(f"producer_task_copying produced {finished_record}")
-
-
-async def producer(queue, name):
-    for i in range(5):
-        await asyncio.sleep(1)  # Simulate some asynchronous task
-        item = f"{name}-{i}"
-        await queue.put(item)
-        print(f"{name} produced {item}")
 
 
 async def consumer(queue, id):
@@ -67,10 +59,19 @@ async def main():
             record = f"{i}-record-{j}"
             print(f"record: {record}")
             items_produced += 1
-            producer_task = asyncio.create_task(producer_task_copying(queue, record))
+            # print("\n\n\n\n", times[i])
+            if record == "1-record-0":
+                producer_task = asyncio.create_task(
+                    producer_task_copying(queue, record, 10)
+                )
+            else:
+                producer_task = asyncio.create_task(
+                    producer_task_copying(queue, record, 1)
+                )
             producer_tasks.append(producer_task)
             # await producer_task_copying(queue, record)
 
+    print("\n\n\n\nGATHERING PRODUCERS.....\n\n\n\n")
     await asyncio.gather(*producer_tasks)
     print(f"\n\n\n\n\nBROKEN\n\n\n\n\n")
     length = queue.qsize()
@@ -78,6 +79,7 @@ async def main():
     for _ in range(3):
         await queue.put("STOP")
     # wait untile all remaining tasks are done
+    print("\n\n\n\nGATHERING CONSUMERS.....\n\n\n\n")
     await asyncio.gather(*consumer_tasks)
     # while queue.qsize() > 0:
     #     await asyncio.sleep(1)
