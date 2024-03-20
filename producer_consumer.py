@@ -1,4 +1,4 @@
-import asyncio, asyncssh, sys
+import asyncio, asyncssh, sys, os
 import time
 
 localmachine_con = None
@@ -16,6 +16,21 @@ async def establish_connections():
     sftp_con = await asyncssh.connect(
         host2, port2, username=username2, password=password2
     )
+    sftp_con = await sftp_con.start_sftp_client()
+
+
+async def producer_task_copying_connector(queue, file_name):
+    global sftp_con
+    await sftp_con.get(
+        remotepaths=f"/root/sample_data/data1/{file_name}",
+        localpath="/home/husseljo/damn/orange-files/python-stream",
+    )
+
+    print(f"STARTING to produce {file_name}\n")
+    finished_record = f"{file_name}-finished"
+    file_path = f"/home/husseljo/damn/orange-files/python-stream/{file_name}"
+    await queue.put(file_path)
+    print(f"producer_task_copying produced {finished_record}")
 
 
 async def producer_task_copying(queue, record, time):
@@ -24,6 +39,28 @@ async def producer_task_copying(queue, record, time):
     finished_record = f"{record}-finished"
     await queue.put(finished_record)
     print(f"producer_task_copying produced {finished_record}")
+
+
+async def consumer_connector(queue, id):
+    global localmachine_con, items_consumed
+    print(f"CONSUMER {id} STARTED")
+    while True:
+        file_path = await queue.get()
+        print(f"item: {file_path}")
+        if file_path == "STOP":
+            # Terminate the consumer when "STOP" is encountered
+            break
+        file_name = os.path.basename(file_path)
+        command = f"docker cp {file_path} namenode:/;docker exec namenode hadoop dfs -copyFromLocal -f {file_name} /python-async-data"
+        result = await localmachine_con.run(command)
+        print(f"Consumer {id}, exit_status for {file_name} output:", result.exit_status)
+        if result.exit_status == 0 and os.path.exists(file_path):
+            os.remove(file_path)
+            print(f"File '{file_path}' removed successfully.")
+
+        print(f"Consumer {id} copied {file_name} HDFS")
+        items_consumed += 1
+        queue.task_done()
 
 
 async def consumer(queue, id):
@@ -46,30 +83,32 @@ async def consumer(queue, id):
 
 async def main():
     await establish_connections()
+    files = [
+        "a.csv",
+        "b.csv",
+        "blud.csv",
+        "gaga.csv",
+        "husselj.csv",
+        "oogaboog.csv",
+        "sonman.csv",
+        "wassup.csv",
+        "yasta.csv",
+        "zaz.csv",
+    ]
+
     queue = asyncio.Queue()
     # the consumer to be running in the background in infiinite loop, until I terminate it by adding a certain string to the queue
-    consumer_tasks = [asyncio.create_task(consumer(queue, i)) for i in range(3)]
+    consumer_tasks = [
+        asyncio.create_task(consumer_connector(queue, i)) for i in range(3)
+    ]
     producer_tasks = []
 
-    i = 0
     items_produced = 0
-    while i < 3:
-        i += 1
-        for j in range(2):
-            record = f"{i}-record-{j}"
-            print(f"record: {record}")
-            items_produced += 1
-            # print("\n\n\n\n", times[i])
-            if record == "1-record-0":
-                producer_task = asyncio.create_task(
-                    producer_task_copying(queue, record, 10)
-                )
-            else:
-                producer_task = asyncio.create_task(
-                    producer_task_copying(queue, record, 1)
-                )
-            producer_tasks.append(producer_task)
-            # await producer_task_copying(queue, record)
+    for file in files:
+        producer_task = asyncio.create_task(
+            producer_task_copying_connector(queue, file)
+        )
+        producer_tasks.append(producer_task)
 
     print("\n\n\n\nGATHERING PRODUCERS.....\n\n\n\n")
     await asyncio.gather(*producer_tasks)
