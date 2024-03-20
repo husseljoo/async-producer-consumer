@@ -19,6 +19,7 @@ async def establish_connections():
 
 
 async def producer_task_copying(queue, record):
+    print(f"STARTING to produce {record}\n")
     await asyncio.sleep(1)  # Simulate some asynchronous task
     finished_record = f"{record}-finished"
     await queue.put(finished_record)
@@ -56,6 +57,7 @@ async def main():
     queue = asyncio.Queue()
     # the consumer to be running in the background in infiinite loop, until I terminate it by adding a certain string to the queue
     consumer_tasks = [asyncio.create_task(consumer(queue, i)) for i in range(3)]
+    producer_tasks = []
 
     i = 0
     items_produced = 0
@@ -65,8 +67,11 @@ async def main():
             record = f"{i}-record-{j}"
             print(f"record: {record}")
             items_produced += 1
-            await producer_task_copying(queue, record)
+            producer_task = asyncio.create_task(producer_task_copying(queue, record))
+            producer_tasks.append(producer_task)
+            # await producer_task_copying(queue, record)
 
+    await asyncio.gather(*producer_tasks)
     print(f"\n\n\n\n\nBROKEN\n\n\n\n\n")
     length = queue.qsize()
     print(f"Queue length: {length}")
